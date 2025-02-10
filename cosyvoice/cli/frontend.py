@@ -11,19 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from functools import partial
-from typing import Generator
 import json
-import onnxruntime
-import torch
-import numpy as np
-import whisper
-from typing import Callable
-import torchaudio.compliance.kaldi as kaldi
-import torchaudio
 import os
 import re
+from functools import partial
+from typing import Callable
+from typing import Generator
+
 import inflect
+import numpy as np
+import onnxruntime
+import torch
+import torchaudio
+import torchaudio.compliance.kaldi as kaldi
+import whisper
+
 try:
     import ttsfrd
     use_ttsfrd = True
@@ -55,6 +57,7 @@ class CosyVoiceFrontEnd:
         self.speech_tokenizer_session = onnxruntime.InferenceSession(speech_tokenizer_model, sess_options=option,
                                                                      providers=["CUDAExecutionProvider" if torch.cuda.is_available() else
                                                                                 "CPUExecutionProvider"])
+        self.spk2info_path = spk2info
         if os.path.exists(spk2info):
             self.spk2info = torch.load(spk2info, map_location=self.device)
         else:
@@ -150,8 +153,23 @@ class CosyVoiceFrontEnd:
 
     def frontend_sft(self, tts_text, spk_id):
         tts_text_token, tts_text_token_len = self._extract_text_token(tts_text)
-        embedding = self.spk2info[spk_id]['embedding']
+        spk = self.spk2info[spk_id]
+        embedding = spk['embedding'].to(self.device)
         model_input = {'text': tts_text_token, 'text_len': tts_text_token_len, 'llm_embedding': embedding, 'flow_embedding': embedding}
+        if 'prompt_text_token' in spk:
+            model_input['prompt_text'] = spk['prompt_text_token'].to(self.device)
+        if 'prompt_text_token_len' in spk:
+            model_input['prompt_text_len'] = spk['prompt_text_token_len'].to(self.device)
+        if 'speech_token' in spk:
+            model_input['llm_prompt_speech_token'] = spk['speech_token'].to(self.device)
+            model_input['flow_prompt_speech_token'] = spk['speech_token'].to(self.device)
+        if 'speech_token_len' in spk:
+            model_input['llm_prompt_speech_token_len'] = spk['speech_token_len'].to(self.device)
+            model_input['flow_prompt_speech_token_len'] = spk['speech_token_len'].to(self.device)
+        if 'speech_feat' in spk:
+            model_input['prompt_speech_feat'] = spk['speech_feat'].to(self.device)
+        if 'speech_feat_len' in spk:
+            model_input['prompt_speech_feat_len'] = spk['speech_feat_len'].to(self.device)
         return model_input
 
     def frontend_zero_shot(self, tts_text, prompt_text, prompt_speech_16k, resample_rate):
